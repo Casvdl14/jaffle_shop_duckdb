@@ -1,3 +1,46 @@
 [sqlfluff]
-
+# Parse SQL as DuckDB (the warehouse this project runs on).
 dialect = duckdb
+
+# The models are SQL with Jinja ({% for %}, {{ ref() }}, ...). SQLFluff has to
+# render that Jinja into plain SQL before it can lint it. "jinja" is the plain
+# templater; it does not know dbt's ref(), so ref() is stubbed out below.
+templater = jinja
+
+# Default is 80, which flags the long generated "sum(case when ...)" line in
+# orders.sql. 120 keeps the check meaningful without noise.
+max_line_length = 120
+
+# Rules to switch off. Add rule codes here (e.g. exclude_rules = LT05) if a
+# rule is too noisy for this project. Empty = every default rule is active.
+exclude_rules =
+
+[sqlfluff:templater:jinja:macros]
+# Stand-in for dbt's ref(): returns the model name so `from {{ ref('x') }}`
+# renders as `from x` and can be parsed as ordinary SQL.
+dbt_ref = {% macro ref(model_name) %}{{ model_name }}{% endmacro %}
+
+[sqlfluff:indentation]
+# Indent with 4 spaces, matching the existing models.
+indent_unit = space
+tab_space_size = 4
+
+[sqlfluff:rules:capitalisation.keywords]
+# select / from / join ... all lowercase, as in the existing models.
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+# sum(), count(), min(), max() lowercase.
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:aliasing.table]
+# Require `from orders as o`, not `from orders o`.
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.column]
+# Require `amount as total`, not `amount total`.
+aliasing = explicit
+
+[sqlfluff:layout:type:comma]
+# Trailing commas (`a,` at end of line), as in the existing models.
+line_position = trailing

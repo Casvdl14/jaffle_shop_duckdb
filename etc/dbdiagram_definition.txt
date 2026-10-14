@@ -6,9 +6,9 @@ Table orders {
 }
 
 Table payments {
-  id int
+  id int PK
   order_id int
-  payment_method int
+  payment_method varchar
   amount int
 }
 

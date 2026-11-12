@@ -38,6 +38,7 @@ seeds/raw_*.csv  ->  models/staging/stg_*.sql  (views)  ->  models/customers.sql
 
 - Staging renames `id` to `<entity>_id` (`customer_id`, `order_id`, `payment_id`) and `user_id` to `customer_id`, so downstream models join on matching names.
 - Models are written as CTEs: imports first (`source` in staging), then `renamed`, and `final` in the marts. Follow that shape in new models.
+- Money amounts always have at most 2 decimals, like real currencies. Round derived amounts with `round(..., 2)` and prefer `decimal(18, 2)` over floating point types. `tests/assert_amounts_have_two_decimals.sql` checks the amount columns of every layer (seeds hold cents, so they must be whole numbers); add new amount columns to it.
 - Tests are generic tests declared in the two `schema.yml` files.
 - SQL files contain Jinja. Edit the source `.sql` files, never the rendered copies in `target/`.
 

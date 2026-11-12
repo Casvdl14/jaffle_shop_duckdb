@@ -29,6 +29,24 @@ models:
       - name: total_order_amount
         description: Total value (AUD) of a customer's orders
 
+      - name: average_order_value
+        description: >
+          Average value (AUD) per order, calculated as total payments divided by number of orders,
+          with 2 decimals. NULL when the customer has no orders or no payments.
+          Zero and negative values are kept, so check average_order_value_status before using it.
+
+      - name: average_order_value_status
+        description: >
+          Why average_order_value can or cannot be trusted. One of: ok (normal positive average),
+          no_orders (customer has no orders), no_payments (orders exist but no payments found),
+          total_paid_is_zero (orders exist but payments add up to 0),
+          total_paid_is_negative (payments add up to less than 0, e.g. refunds above payments).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['ok', 'no_orders', 'no_payments', 'total_paid_is_zero', 'total_paid_is_negative']
+
   - name: orders
     description: This table has basic information about orders, as well as some derived facts based on payments
 

@@ -1,0 +1,179 @@
+IMPROVEMENT NOTES
+=================
+Status: proposals only. None of these are applied to the repo yet.
+Each item: what / how / why, followed by example code.
+
+
+ITEM 5: Doc mismatch in models/schema.yml
+-----------------------------------------
+WHAT'S WRONG
+  models/schema.yml documents a column `total_order_amount` on the
+  `customers` model ("Total value (AUD) of a customer's orders").
+  models/customers.sql outputs `customer_lifetime_value`. The name
+  `total_order_amount` only exists as an internal CTE column
+  (customer_payments.total_amount), not in the model output.
+
+PROPOSED CHANGE
+  In models/schema.yml, rename the documented column
+  `total_order_amount` to `customer_lifetime_value`. One-line edit,
+  no SQL changes.
+
+WHY
+  - `dbt docs` shows a column that does not exist and leaves the real
+    one undocumented.
+  - Any test added later under the old name would fail.
+
+ALTERNATIVE (not recommended)
+  Rename the column in the SQL to `total_order_amount`. This changes
+  the model's output and could break anything reading
+  `customer_lifetime_value`.
+
+EXAMPLE (models/schema.yml, customers model)
+
+  Before:
+      - name: total_order_amount
+        description: Total value (AUD) of a customer's orders
+
+  After:
+      - name: customer_lifetime_value
+        description: Total value (AUD) of all payments from a customer's orders
+
+
+ITEM 6: relationships tests
+---------------------------
+WHAT
+  A `relationships` test checks that every value in a column exists in
+  a column of another model (a foreign-key check). Proposed additions
+  to models/staging/schema.yml:
+    - stg_orders.customer_id   must exist in stg_customers.customer_id
+    - stg_payments.order_id    must exist in stg_orders.order_id
+
+WHY THESE TWO
+  - They are the only two foreign keys in the ERD
+    (orders.user_id > customers.id, payments.order_id > orders.id).
+  - They are the exact join keys used in customers.sql and orders.sql.
+  - Other columns (dates, statuses, amounts) are not keys. Primary keys
+    are already covered by `unique` and `not_null`.
+
+BENEFIT
+  Both joins are left joins, so bad keys disappear silently. A payment
+  with an unknown order_id would just drop out of customer lifetime
+  value with no error. The test turns that into a visible failure.
+
+REDUNDANCY NOTE
+  The mart-level test orders.customer_id -> customers already catches
+  orphan customer ids, so stg_orders.customer_id mostly duplicates it
+  (it would only fail earlier and point at the source layer).
+  stg_payments.order_id is genuinely new coverage: no existing test
+  covers payments -> orders. Add that one for sure; the other is
+  optional.
+
+EXAMPLE (models/staging/schema.yml)
+
+  - name: stg_orders
+    columns:
+      - name: customer_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+
+  - name: stg_payments
+    columns:
+      - name: order_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+
+  (Merge these under the existing stg_orders / stg_payments entries,
+  next to the tests already there. The `arguments:` form matches the
+  style already used in this repo.)
+
+
+ITEM 7: Singular test for the customers aggregates
+--------------------------------------------------
+WHAT
+  A singular test is a SQL file in tests/ that passes when it returns
+  zero rows. dbt_project.yml already points at tests/ but the folder
+  does not exist yet. Proposed file:
+  tests/assert_customers_totals_match_source.sql
+
+HOW
+  Compares two totals between `customers` and the staging models:
+    - sum(number_of_orders) in customers = row count of stg_orders
+    - sum(customer_lifetime_value) in customers = sum(amount) in
+      stg_payments, rounded to 2 decimals to avoid floating-point noise
+  Each mismatch returns a row naming the metric and both values.
+
+WHY
+  `unique` and `not_null` cannot tell whether rows were lost or
+  double-counted in the joins. This test can.
+
+CAVEATS
+  - Not run yet, so it is unknown whether it passes on the current data.
+  - It will fail if orphan payments exist. That is the point.
+  - Before committing: run it with `dbt test` and lint it with sqlfluff.
+
+EXAMPLE (tests/assert_customers_totals_match_source.sql)
+
+-- Singular dbt test: it passes when this query returns ZERO rows.
+-- Every row returned is a failure, and the columns explain what went wrong.
+--
+-- Why it exists: `customers` aggregates orders and payments with left joins.
+-- Generic tests (unique / not_null) cannot notice rows silently falling out of
+-- those joins or being counted twice. Reconciling the totals of `customers`
+-- against the upstream staging models catches both.
+
+with customer_totals as (
+
+    select
+        -- Customers with no orders have NULLs here (left join), so
+        -- coalesce to 0 before summing to compare like with like.
+        sum(coalesce(number_of_orders, 0)) as number_of_orders,
+        sum(coalesce(customer_lifetime_value, 0)) as customer_lifetime_value
+    from {{ ref('customers') }}
+
+),
+
+source_totals as (
+
+    select
+        (select count(*) from {{ ref('stg_orders') }}) as number_of_orders,
+        (select sum(amount) from {{ ref('stg_payments') }}) as customer_lifetime_value
+
+),
+
+-- One row per metric where customers and source disagree.
+-- round(..., 2) avoids false failures from floating point noise on money.
+mismatches as (
+
+    select
+        'number_of_orders' as metric,
+        customer_totals.number_of_orders as customers_value,
+        source_totals.number_of_orders as source_value
+    from customer_totals
+    cross join source_totals
+    where customer_totals.number_of_orders != source_totals.number_of_orders
+
+    union all
+
+    select
+        'customer_lifetime_value' as metric,
+        round(customer_totals.customer_lifetime_value, 2) as customers_value,
+        round(source_totals.customer_lifetime_value, 2) as source_value
+    from customer_totals
+    cross join source_totals
+    where round(customer_totals.customer_lifetime_value, 2)
+        != round(source_totals.customer_lifetime_value, 2)
+
+)
+
+select * from mismatches
+
+
+OTHER NOTES / OPEN QUESTIONS
+----------------------------
+(space for your own notes)

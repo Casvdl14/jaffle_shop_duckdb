@@ -41,6 +41,9 @@ EXAMPLE (models/schema.yml, customers model)
 
 ITEM 6: relationships tests
 ---------------------------
+STATUS: DONE. Both tests were added to models/staging/schema.yml in
+commit 0be407a.
+
 WHAT
   A `relationships` test checks that every value in a column exists in
   a column of another model (a foreign-key check). Proposed additions
